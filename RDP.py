@@ -31,8 +31,12 @@ class RDPApp(tk.Tk):
         self._build_ui()
 
     def _build_ui(self):
+        # Three column layout: left(inputs), middle(data tables), right(visualization)
         left = ttk.Frame(self)
         left.pack(side='left', fill='y', padx=8, pady=8)
+
+        middle = ttk.Frame(self)
+        middle.pack(side='left', fill='both', expand=False, padx=8, pady=8)
 
         right = ttk.Frame(self)
         right.pack(side='right', fill='both', expand=True, padx=8, pady=8)
@@ -43,31 +47,36 @@ class RDPApp(tk.Tk):
         n_entry = ttk.Entry(left, textvariable=self.n_var, width=6)
         n_entry.pack(anchor='w')
 
-        gen_btn = ttk.Button(left, text='Generate Matrix', command=self.generate_matrix)
+        # Use tk.Button so we can set colors for visual guidance
+        gen_btn = tk.Button(left, text='Generate Matrix', command=self.generate_matrix, bg='#ADD8E6')
         gen_btn.pack(fill='x', pady=4)
 
-        rand_btn = ttk.Button(left, text='Randomize Relations', command=self.randomize_matrix)
+        rand_btn = tk.Button(left, text='Randomize Relations', command=self.randomize_matrix, bg='#ADD8E6')
         rand_btn.pack(fill='x', pady=4)
 
-        cfg_btn = ttk.Button(left, text='Configure Values', command=self.configure_values)
+        cfg_btn = tk.Button(left, text='Configure Values', command=self.configure_values)
         cfg_btn.pack(fill='x', pady=4)
 
-        start_btn = ttk.Button(left, text='Start Calculation', command=self.start_calculation)
+        start_btn = tk.Button(left, text='Start Calculation', command=self.start_calculation, bg='#90EE90')
         start_btn.pack(fill='x', pady=8)
 
         control_frame = ttk.Frame(left)
         control_frame.pack(fill='x', pady=8)
-        self.next_btn = ttk.Button(control_frame, text='Next Step', command=self.next_step, state='disabled')
+        self.next_btn = tk.Button(control_frame, text='Next Step', command=self.next_step, state='disabled', bg='#00FFFF')
         self.next_btn.pack(side='left', expand=True, fill='x')
-        run_btn = ttk.Button(control_frame, text='Run to End', command=self.run_to_end, state='disabled')
+        run_btn = tk.Button(control_frame, text='Run to End', command=self.run_to_end, state='disabled', bg='#90EE90')
         run_btn.pack(side='left', expand=True, fill='x', padx=4)
-        reset_btn = ttk.Button(control_frame, text='Reset', command=self.reset_all)
+        reset_btn = tk.Button(control_frame, text='Reset', command=self.reset_all, bg='#FA8072')
         reset_btn.pack(side='left', expand=True, fill='x')
         self.run_btn = run_btn
 
+        # Jump to Layout shortcut button
+        self.jump_btn = tk.Button(left, text='Jump to Layout Phase', command=self.jump_to_layout, bg='#FFA500', state='disabled')
+        self.jump_btn.pack(fill='x', pady=6)
+
         ttk.Separator(left, orient='horizontal').pack(fill='x', pady=6)
 
-        # Matrix area with scrollable canvas
+        # Matrix area with scrollable canvas (left column)
         self.matrix_container = ttk.Frame(left)
         self.matrix_container.pack(fill='both', expand=True)
         self.matrix_canvas = tk.Canvas(self.matrix_container, height=300)
@@ -81,16 +90,16 @@ class RDPApp(tk.Tk):
         self.matrix_scroll_x.pack(side='bottom', fill='x')
         self.matrix_inner.bind('<Configure>', lambda e: self.matrix_canvas.configure(scrollregion=self.matrix_canvas.bbox('all')))
 
-        # Right: Log and Canvas
-        log_label = ttk.Label(right, text='Log:')
+        # Middle: Log and Canvas (center column)
+        log_label = ttk.Label(middle, text='Log:')
         log_label.pack(anchor='w')
-        self.log_text = tk.Text(right, height=12)
+        self.log_text = tk.Text(middle, height=12)
         self.log_text.pack(fill='x')
 
-        canvas_label = ttk.Label(right, text='Layout Visualization:')
+        canvas_label = ttk.Label(middle, text='Layout Visualization:')
         canvas_label.pack(anchor='w')
         # Canvas with scrollbars
-        canvas_frame = ttk.Frame(right)
+        canvas_frame = ttk.Frame(middle)
         canvas_frame.pack(fill='both', expand=True)
         self.canvas = tk.Canvas(canvas_frame, bg='white')
         self.canvas_h = ttk.Scrollbar(canvas_frame, orient='horizontal', command=self.canvas.xview)
@@ -106,16 +115,19 @@ class RDPApp(tk.Tk):
         self.var_matrix = []
         self.om_matrix = []
 
-        # TCR treeview
-        self.tcr_tree = ttk.Treeview(self.matrix_container, columns=('dept','tcr'), show='headings', height=6)
+        # Right column: Data tables (TCR top, WPV bottom)
+        data_top = ttk.LabelFrame(right, text='TCR Table')
+        data_top.pack(fill='both', expand=False)
+        self.tcr_tree = ttk.Treeview(data_top, columns=('dept','tcr'), show='headings', height=8)
         self.tcr_tree.heading('dept', text='Dept')
         self.tcr_tree.heading('tcr', text='TCR')
-        self.tcr_tree.pack(side='bottom', fill='x', pady=2)
+        self.tcr_tree.pack(fill='both', expand=True)
 
-        # WPV / Placement log below TCR
-        self.wpv_tree = ttk.Treeview(self.matrix_container, columns=('msg',), show='headings', height=6)
+        data_bottom = ttk.LabelFrame(right, text='Placement Log & WPV')
+        data_bottom.pack(fill='both', expand=True, pady=6)
+        self.wpv_tree = ttk.Treeview(data_bottom, columns=('msg',), show='headings', height=8)
         self.wpv_tree.heading('msg', text='Placement Log & WPV')
-        self.wpv_tree.pack(side='bottom', fill='x', pady=4)
+        self.wpv_tree.pack(fill='both', expand=True)
 
         # initial matrix
         self.generate_matrix()
@@ -176,6 +188,11 @@ class RDPApp(tk.Tk):
         # ensure WPV log cleared when generating
         try:
             self.wpv_tree.delete(*self.wpv_tree.get_children())
+        except Exception:
+            pass
+        # enable jump button now that a matrix exists
+        try:
+            self.jump_btn.config(state='normal')
         except Exception:
             pass
 
@@ -246,6 +263,38 @@ class RDPApp(tk.Tk):
         self.log('Selection phase prepared. Use Next Step or Run to End.')
         self.next_btn.config(state='normal')
         self.run_btn.config(state='normal')
+        try:
+            self.jump_btn.config(state='disabled')
+        except Exception:
+            pass
+
+    def jump_to_layout(self):
+        # Execute Steps 1-6 (calculation & sequencing) and prepare layout, stop before placements
+        # run silently and enable layout controls
+        self.reset_state_for_run()
+        self.compute_tcr()
+        self.build_selection_sequence()
+        # prepare layout steps (but do not execute any placement)
+        self.prepare_layout()
+        # move to layout phase, but don't show ghosts or place anything
+        self.current_phase = 'layout'
+        self.layout_index = 0
+        # Log summary: show final TCR and full sequence
+        self.log('Jumped to Layout Phase: Steps 1-6 completed (stopped before first placement).')
+        self.log('Final Sequence: ' + ' -> '.join(f'D{d+1}' for d in self.sequence))
+        # populate TCR view already done by compute_tcr; ensure WPV is cleared
+        try:
+            self.wpv_tree.delete(*self.wpv_tree.get_children())
+        except Exception:
+            pass
+        # enable flow controls for layout continuation
+        self.next_btn.config(state='normal')
+        self.run_btn.config(state='normal')
+        # disable jump to avoid repeated jumps
+        try:
+            self.jump_btn.config(state='disabled')
+        except Exception:
+            pass
 
     def reset_state_for_run(self):
         self.sequence = []
@@ -659,6 +708,8 @@ class RDPApp(tk.Tk):
             self.canvas.create_text(px, py, text=f'{wpv:.1f}', fill='#000000', tags=('ghost',))
 
     def reset_all(self):
+        # Reset algorithmic state
+        self.reset_state_for_run()
         self.sequence = []
         self.selection_steps = []
         self.layout_steps = []
@@ -666,8 +717,17 @@ class RDPApp(tk.Tk):
         self.selection_index = 0
         self.layout_index = 0
         self.placed_positions = {}
-        self.canvas.delete('all')
-        self.log_text.delete('1.0', 'end')
+
+        # Clear canvas and logs
+        try:
+            self.canvas.delete('all')
+        except Exception:
+            pass
+        try:
+            self.log_text.delete('1.0', 'end')
+        except Exception:
+            pass
+
         # clear TCR and WPV views
         try:
             self.tcr_tree.delete(*self.tcr_tree.get_children())
@@ -677,8 +737,35 @@ class RDPApp(tk.Tk):
             self.wpv_tree.delete(*self.wpv_tree.get_children())
         except Exception:
             pass
-        self.next_btn.config(state='disabled')
-        self.run_btn.config(state='disabled')
+
+        # Reset matrix inputs to default 'U' and update widgets
+        try:
+            if hasattr(self, 'matrix') and self.matrix:
+                for i in range(self.n):
+                    for j in range(self.n):
+                        self.matrix[i][j] = 'U'
+                        try:
+                            # set display var to '' for U
+                            if self.var_matrix and self.var_matrix[i][j] is not None:
+                                self.var_matrix[i][j].set('')
+                            if self.om_matrix and self.om_matrix[i][j] is not None:
+                                self._apply_cell_color(i, j, self.om_matrix[i][j], '')
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # disable flow controls until next calculation
+        try:
+            self.next_btn.config(state='disabled')
+            self.run_btn.config(state='disabled')
+        except Exception:
+            pass
+        # re-enable jump (matrix may still be present) but default to disabled until generation
+        try:
+            self.jump_btn.config(state='disabled')
+        except Exception:
+            pass
 
     def log(self, msg):
         ts = time.strftime('%H:%M:%S')
