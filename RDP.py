@@ -15,8 +15,20 @@ class RDPApp(tk.Tk):
         self.geometry('1200x700')
 
         self.values = DEFAULT_VALUES.copy()
-        self.n = 6
-        self.matrix = []
+        # Default to the provided 9x9 Relationship Chart (REL)
+        self.n = 9
+        # Hard-coded symmetric REL matrix (A..I)
+        self.matrix = [
+            ['U','A','X','X','U','U','U','U','U'],
+            ['A','U','A','A','A','E','I','O','U'],
+            ['X','A','U','A','X','X','X','X','X'],
+            ['X','A','A','U','E','X','X','X','X'],
+            ['U','A','X','E','U','A','E','I','O'],
+            ['U','E','X','X','A','U','A','E','I'],
+            ['U','I','X','X','E','A','U','A','E'],
+            ['U','O','X','X','I','E','A','U','A'],
+            ['U','U','X','X','O','I','E','A','U'],
+        ]
 
         self.sequence = []  # final Pi
         self.selection_steps = []  # logs for selection phase
@@ -129,8 +141,8 @@ class RDPApp(tk.Tk):
         self.wpv_tree.heading('msg', text='Placement Log & WPV')
         self.wpv_tree.pack(fill='both', expand=True)
 
-        # initial matrix
-        self.generate_matrix()
+        # initial matrix - pass init=False so the hard-coded default isn't overwritten
+        self.generate_matrix(init=False)
 
     def generate_matrix(self, init=True):
         try:
