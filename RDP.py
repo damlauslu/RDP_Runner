@@ -1,8 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, messagebox, filedialog
 import random
 import math
-import time
 
 DEFAULT_VALUES = {'A': 10000, 'E': 1000, 'I': 100, 'O': 10, 'U': 0, 'X': -10000}
 REL_CHOICES = ['A', 'E', 'I', 'O', 'U', 'X']
@@ -17,18 +16,8 @@ class RDPApp(tk.Tk):
         self.values = DEFAULT_VALUES.copy()
         # Default to the provided 9x9 Relationship Chart (REL)
         self.n = 9
-        # Hard-coded symmetric REL matrix (A..I)
-        self.matrix = [
-            ['U','A','X','X','U','U','U','U','U'],
-            ['A','U','A','A','A','E','I','O','U'],
-            ['X','A','U','A','X','X','X','X','X'],
-            ['X','A','A','U','E','X','X','X','X'],
-            ['U','A','X','E','U','A','E','I','O'],
-            ['U','E','X','X','A','U','A','E','I'],
-            ['U','I','X','X','E','A','U','A','E'],
-            ['U','O','X','X','I','E','A','U','A'],
-            ['U','U','X','X','O','I','E','A','U'],
-        ]
+        self._last_n = self.n
+        self.matrix = []
 
         self.sequence = []  # final Pi
         self.selection_steps = []  # logs for selection phase
@@ -39,29 +28,36 @@ class RDPApp(tk.Tk):
         self.layout_index = 0
 
         self.placed_positions = {}  # dept_id -> (x,y)
+        self.started_for_matrix = False
 
         self._build_ui()
 
     def _build_ui(self):
-        # Three column layout: left(inputs), middle(data tables), right(visualization)
-        left = ttk.Frame(self)
-        left.pack(side='left', fill='y', padx=8, pady=8)
+        # Three column layout with user-resizable sashes
+        paned = tk.PanedWindow(self, orient='horizontal')
+        paned.pack(fill='both', expand=True, padx=8, pady=8)
 
-        middle = ttk.Frame(self)
-        middle.pack(side='left', fill='both', expand=False, padx=8, pady=8)
+        left = ttk.Frame(paned)
+        middle = ttk.Frame(paned)
+        right = ttk.Frame(paned)
 
-        right = ttk.Frame(self)
-        right.pack(side='right', fill='both', expand=True, padx=8, pady=8)
+        paned.add(left, minsize=180, stretch='never')
+        paned.add(middle, minsize=360, stretch='always')
+        paned.add(right, minsize=180, stretch='never')
+        self._paned = paned
+        self._in_paned_configure = False
+        self._sashes_set = False
+        self.after_idle(self._apply_initial_sashes)
+        paned.bind('<Configure>', self._on_paned_configure)
 
         # Controls
-        ttk.Label(left, text='Number of Departments:').pack(anchor='w')
+        num_frame = tk.Frame(left, bg='#F1F4F8')
+        num_frame.pack(fill='x', pady=(4, 8))
+        tk.Label(num_frame, text='Number of Departments:', bg='#F1F4F8').pack(anchor='center', pady=(4, 2))
         self.n_var = tk.IntVar(value=self.n)
-        n_entry = ttk.Entry(left, textvariable=self.n_var, width=6)
-        n_entry.pack(anchor='w')
-
-        # Use tk.Button so we can set colors for visual guidance
-        gen_btn = tk.Button(left, text='Generate Matrix', command=self.generate_matrix, bg='#ADD8E6')
-        gen_btn.pack(fill='x', pady=4)
+        n_spin = ttk.Spinbox(num_frame, from_=2, to=20, textvariable=self.n_var, width=6, command=self._on_n_change)
+        n_spin.pack(anchor='center', pady=(0, 6))
+        self.n_var.trace_add('write', lambda *args: self._on_n_change())
 
         rand_btn = tk.Button(left, text='Randomize Relations', command=self.randomize_matrix, bg='#ADD8E6')
         rand_btn.pack(fill='x', pady=4)
@@ -74,24 +70,45 @@ class RDPApp(tk.Tk):
 
         control_frame = ttk.Frame(left)
         control_frame.pack(fill='x', pady=8)
-        self.next_btn = tk.Button(control_frame, text='Next Step', command=self.next_step, state='disabled', bg='#00FFFF')
+        # Row 1: Next / Jump / Run
+        row1 = ttk.Frame(control_frame)
+        row1.pack(fill='x')
+        self.next_btn = tk.Button(row1, text='Next Step', command=self.next_step, state='disabled', bg='#00FFFF')
         self.next_btn.pack(side='left', expand=True, fill='x')
-        run_btn = tk.Button(control_frame, text='Run to End', command=self.run_to_end, state='disabled', bg='#90EE90')
-        run_btn.pack(side='left', expand=True, fill='x', padx=4)
-        reset_btn = tk.Button(control_frame, text='Reset', command=self.reset_all, bg='#FA8072')
-        reset_btn.pack(side='left', expand=True, fill='x')
+        self.jump_btn = tk.Button(row1, text='Jump to Layout Phase', command=self.jump_to_layout, bg='#FFA500', state='disabled')
+        self.jump_btn.pack(side='left', expand=True, fill='x', padx=4)
+        run_btn = tk.Button(row1, text='Run to End', command=self.run_to_end, state='disabled', bg='#90EE90')
+        run_btn.pack(side='left', expand=True, fill='x')
         self.run_btn = run_btn
+        # Row 2: Reset buttons
+        row2 = ttk.Frame(control_frame)
+        row2.pack(fill='x', pady=(6, 0))
+        reset_btn = tk.Button(row2, text='Reset All', command=self.reset_all, bg='#FA8072')
+        reset_btn.pack(side='left', expand=True, fill='x')
+        reset_keep_btn = tk.Button(row2, text='Reset Steps', command=self.reset_steps_only, bg='#FAE28C')
+        reset_keep_btn.pack(side='left', expand=True, fill='x', padx=4)
 
-        # Jump to Layout shortcut button
-        self.jump_btn = tk.Button(left, text='Jump to Layout Phase', command=self.jump_to_layout, bg='#FFA500', state='disabled')
-        self.jump_btn.pack(fill='x', pady=6)
+        preview_btn = tk.Button(left, text='Preview Report', command=self.preview_report, bg='#E0E0E0')
+        preview_btn.pack(fill='x', pady=4)
+        export_btn = tk.Button(left, text='Export Report (.txt)', command=self.export_report, bg='#D3D3D3')
+        export_btn.pack(fill='x', pady=6)
+        guide_btn = tk.Button(left, text='Guide', command=self.show_guide, bg='#E6E6FA')
+        guide_btn.pack(fill='x', pady=4)
+        info_btn = tk.Button(left, text='RDP Steps Info', command=self.show_steps_info, bg='#E6F3FF')
+        info_btn.pack(fill='x', pady=4)
 
         ttk.Separator(left, orient='horizontal').pack(fill='x', pady=6)
 
-        # Matrix area with scrollable canvas (left column)
-        self.matrix_container = ttk.Frame(left)
+        # Log area (left column, where matrix used to be)
+        log_label = ttk.Label(left, text='Log:')
+        log_label.pack(anchor='w')
+        self.log_text = tk.Text(left, height=12)
+        self.log_text.pack(fill='both', expand=True)
+
+        # Middle: Matrix and Canvas (center column)
+        self.matrix_container = ttk.Frame(middle)
         self.matrix_container.pack(fill='both', expand=True)
-        self.matrix_canvas = tk.Canvas(self.matrix_container, height=300)
+        self.matrix_canvas = tk.Canvas(self.matrix_container, height=360)
         self.matrix_scroll_y = ttk.Scrollbar(self.matrix_container, orient='vertical', command=self.matrix_canvas.yview)
         self.matrix_scroll_x = ttk.Scrollbar(self.matrix_container, orient='horizontal', command=self.matrix_canvas.xview)
         self.matrix_inner = ttk.Frame(self.matrix_canvas)
@@ -101,19 +118,14 @@ class RDPApp(tk.Tk):
         self.matrix_scroll_y.pack(side='right', fill='y')
         self.matrix_scroll_x.pack(side='bottom', fill='x')
         self.matrix_inner.bind('<Configure>', lambda e: self.matrix_canvas.configure(scrollregion=self.matrix_canvas.bbox('all')))
-
-        # Middle: Log and Canvas (center column)
-        log_label = ttk.Label(middle, text='Log:')
-        log_label.pack(anchor='w')
-        self.log_text = tk.Text(middle, height=12)
-        self.log_text.pack(fill='x')
+        self.matrix_canvas.bind('<Configure>', self._center_matrix_window)
 
         canvas_label = ttk.Label(middle, text='Layout Visualization:')
         canvas_label.pack(anchor='w')
         # Canvas with scrollbars
         canvas_frame = ttk.Frame(middle)
         canvas_frame.pack(fill='both', expand=True)
-        self.canvas = tk.Canvas(canvas_frame, bg='white')
+        self.canvas = tk.Canvas(canvas_frame, bg='white', height=280)
         self.canvas_h = ttk.Scrollbar(canvas_frame, orient='horizontal', command=self.canvas.xview)
         self.canvas_v = ttk.Scrollbar(canvas_frame, orient='vertical', command=self.canvas.yview)
         self.canvas.configure(xscrollcommand=self.canvas_h.set, yscrollcommand=self.canvas_v.set)
@@ -134,6 +146,10 @@ class RDPApp(tk.Tk):
         self.tcr_tree.heading('dept', text='Dept')
         self.tcr_tree.heading('tcr', text='TCR')
         self.tcr_tree.pack(fill='both', expand=True)
+        ttk.Label(data_top, text='Sequence (Pi):').pack(anchor='w', pady=(6, 0))
+        self.sequence_text = tk.Text(data_top, height=2, wrap='word')
+        self.sequence_text.pack(fill='x')
+        self.sequence_text.config(state='disabled')
 
         data_bottom = ttk.LabelFrame(right, text='Placement Log & WPV')
         data_bottom.pack(fill='both', expand=True, pady=6)
@@ -141,8 +157,8 @@ class RDPApp(tk.Tk):
         self.wpv_tree.heading('msg', text='Placement Log & WPV')
         self.wpv_tree.pack(fill='both', expand=True)
 
-        # initial matrix - pass init=False so the hard-coded default isn't overwritten
-        self.generate_matrix(init=False)
+        # initial matrix
+        self.generate_matrix(init=True)
 
     def generate_matrix(self, init=True):
         try:
@@ -150,10 +166,12 @@ class RDPApp(tk.Tk):
         except Exception:
             messagebox.showerror('Error', 'Invalid N')
             return
-        if n < 2 or n > 26:
-            messagebox.showerror('Error', 'N must be between 2 and 26')
+        if n < 2 or n > 20:
+            messagebox.showerror('Error', 'N must be between 2 and 20')
             return
         self.n = n
+        self._last_n = n
+        self.started_for_matrix = False
         # initialize matrix with 'U' only if requested
         if init or not hasattr(self, 'matrix') or not self.matrix:
             self.matrix = [['U' for _ in range(n)] for _ in range(n)]
@@ -194,24 +212,30 @@ class RDPApp(tk.Tk):
             self.var_matrix.append(row_vars)
             self.om_matrix.append(row_oms)
 
-        # update TCR view
-        self.update_tcr_view()
-
-        # ensure WPV log cleared when generating
-        try:
-            self.wpv_tree.delete(*self.wpv_tree.get_children())
-        except Exception:
-            pass
+        self._clear_outputs()
         # enable jump button now that a matrix exists
         try:
             self.jump_btn.config(state='normal')
         except Exception:
             pass
 
+    def _on_n_change(self):
+        try:
+            n = int(self.n_var.get())
+        except Exception:
+            return
+        if n < 2 or n > 20:
+            return
+        if n == getattr(self, '_last_n', None):
+            return
+        self.generate_matrix(init=True)
+
     def _on_matrix_change(self, i, j, val):
         # val comes from OptionMenu; treat '' as 'U'
         chosen = val if val != '' else 'U'
         if 0 <= i < self.n and 0 <= j < self.n:
+            self.started_for_matrix = False
+            self._clear_outputs()
             # enforce symmetry
             self.matrix[i][j] = chosen
             self.matrix[j][i] = chosen
@@ -229,8 +253,7 @@ class RDPApp(tk.Tk):
                 self._apply_cell_color(j, i, self.om_matrix[j][i], disp)
             except Exception:
                 pass
-            # update TCR view immediately
-            self.update_tcr_view()
+            # calculations are only shown after Start Calculation
 
     def randomize_matrix(self):
         # Weighted randomization - sparser on strong relations
@@ -261,24 +284,31 @@ class RDPApp(tk.Tk):
         self.wait_window(dlg)
         if dlg.result:
             self.values = dlg.result
+            self.started_for_matrix = False
             self.log(f'Values updated: {self.values}')
             # refresh TCR view if present
             self.update_tcr_view()
 
     def start_calculation(self):
+        if self.started_for_matrix:
+            return
         # compute selection sequence following the strict logic
         self.reset_state_for_run()
         self.compute_tcr()
         self.build_selection_sequence()
         self.current_phase = 'selection'
         self.selection_index = 0
-        self.log('Selection phase prepared. Use Next Step or Run to End.')
+        self.log('Selection phase prepared. Use Next Step, Jump to Layout, or Run to End.')
+        self.log('Next Step: advances one step at a time.')
+        self.log('Jump to Layout: completes selection and prepares layout.')
+        self.log('Run to End: completes all steps quickly.')
         self.next_btn.config(state='normal')
         self.run_btn.config(state='normal')
         try:
-            self.jump_btn.config(state='disabled')
+            self.jump_btn.config(state='normal')
         except Exception:
             pass
+        self.started_for_matrix = True
 
     def jump_to_layout(self):
         # Execute Steps 1-6 (calculation & sequencing) and prepare layout, stop before placements
@@ -286,6 +316,8 @@ class RDPApp(tk.Tk):
         self.reset_state_for_run()
         self.compute_tcr()
         self.build_selection_sequence()
+        for s in self.selection_steps:
+            self.log(s)
         # prepare layout steps (but do not execute any placement)
         self.prepare_layout()
         # move to layout phase, but don't show ghosts or place anything
@@ -318,7 +350,7 @@ class RDPApp(tk.Tk):
         self.layout_index = 0
         self.layout_showing_ghosts = False
 
-    def compute_tcr(self):
+    def compute_tcr(self, log_result=False):
         # TCR excludes 'X' relationships
         self.tcr = [0 for _ in range(self.n)]
         for i in range(self.n):
@@ -331,7 +363,8 @@ class RDPApp(tk.Tk):
                     continue
                 s += self.values.get(rel, 0)
             self.tcr[i] = s
-        self.log(f'Computed TCR: {self.tcr}')
+        if log_result:
+            self.log(f'Computed TCR: {self.tcr}')
         self.update_tcr_view()
 
     def update_tcr_view(self):
@@ -477,9 +510,7 @@ class RDPApp(tk.Tk):
                     Pi[i] = remaining.pop(0)
 
         self.sequence = Pi
-        self.log('Selection sequence built: ' + ' -> '.join(f'D{d+1}' for d in Pi))
-        for s in self.selection_steps:
-            self.log(s)
+        self._update_sequence_view()
 
     def next_step(self):
         if self.current_phase == 'selection':
@@ -573,7 +604,6 @@ class RDPApp(tk.Tk):
         self.layout_steps = []
         center = (0, 0)
         occupied = {}
-        directions = [(-1,0), (1,0), (0,-1), (0,1), (-1,-1), (1,-1), (1,1), (-1,1)]
         for k, dept in enumerate(self.sequence):
             if k == 0:
                 coord = center
@@ -722,6 +752,7 @@ class RDPApp(tk.Tk):
     def reset_all(self):
         # Reset algorithmic state
         self.reset_state_for_run()
+        self.started_for_matrix = False
         self.sequence = []
         self.selection_steps = []
         self.layout_steps = []
@@ -730,25 +761,7 @@ class RDPApp(tk.Tk):
         self.layout_index = 0
         self.placed_positions = {}
 
-        # Clear canvas and logs
-        try:
-            self.canvas.delete('all')
-        except Exception:
-            pass
-        try:
-            self.log_text.delete('1.0', 'end')
-        except Exception:
-            pass
-
-        # clear TCR and WPV views
-        try:
-            self.tcr_tree.delete(*self.tcr_tree.get_children())
-        except Exception:
-            pass
-        try:
-            self.wpv_tree.delete(*self.wpv_tree.get_children())
-        except Exception:
-            pass
+        self._clear_outputs()
 
         # Reset matrix inputs to default 'U' and update widgets
         try:
@@ -779,10 +792,273 @@ class RDPApp(tk.Tk):
         except Exception:
             pass
 
+    def reset_steps_only(self):
+        # Keep matrix; clear progression, logs, and placements
+        self.reset_state_for_run()
+        self.current_phase = 'idle'
+        self.selection_index = 0
+        self.layout_index = 0
+        self.started_for_matrix = False
+        self._clear_outputs()
+        try:
+            self.next_btn.config(state='disabled')
+            self.run_btn.config(state='disabled')
+            self.jump_btn.config(state='normal')
+        except Exception:
+            pass
+
     def log(self, msg):
-        ts = time.strftime('%H:%M:%S')
-        self.log_text.insert('end', f'[{ts}] {msg}\n')
+        self.log_text.insert('end', f'- {msg}\n')
         self.log_text.see('end')
+
+    def _clear_outputs(self):
+        try:
+            self.canvas.delete('all')
+        except Exception:
+            pass
+        try:
+            self.log_text.delete('1.0', 'end')
+        except Exception:
+            pass
+        try:
+            self.tcr_tree.delete(*self.tcr_tree.get_children())
+        except Exception:
+            pass
+        try:
+            self.wpv_tree.delete(*self.wpv_tree.get_children())
+        except Exception:
+            pass
+        try:
+            self._update_sequence_view(clear=True)
+        except Exception:
+            pass
+
+    def show_guide(self):
+        guide = (
+            'Quick Guide\n'
+            '- Set the number of departments; the matrix updates automatically.\n'
+            '- Edit relationships or use Randomize Relations.\n'
+            '- Start Calculation: computes TCR and prepares selection steps.\n'
+            '- Next Step: advances one step at a time.\n'
+            '- Jump to Layout: completes selection and prepares layout.\n'
+            '- Run to End: completes all steps quickly.\n'
+            '- Reset Steps: keeps the matrix, clears progress.\n'
+            '- Reset All: clears everything.\n'
+            '- Export Report: exports inputs and the algorithm flow.'
+        )
+        messagebox.showinfo('Guide', guide)
+
+    def show_steps_info(self):
+        info = (
+            'RDP Algorithm Steps (Summary)\n'
+            '- Step 1: define departments and relationship values (A/E/I/O/U/X).\n'
+            '- Step 2: build the relationship matrix (REL).\n'
+            '- Step 3: compute TCR for each department and initialize the sequence.\n'
+            '- Step 4: pick the first department with the highest TCR.\n'
+            '- Step 5: if a department has an X relation to the current, place it at the back.\n'
+            '- Step 6: choose the next department with the highest-priority relation\n'
+            '  to the already selected set (A > E > I > O).\n'
+            '- Fallback: if no A/E/I/O exists, pick by highest TCR.\n'
+            '\n'
+            'Note: The log shows which rule was applied, not a global step count.'
+        )
+        messagebox.showinfo('RDP Steps Info', info)
+
+    def _update_sequence_view(self, clear=False):
+        try:
+            self.sequence_text.config(state='normal')
+            self.sequence_text.delete('1.0', 'end')
+            if clear or not self.sequence:
+                self.sequence_text.insert('end', '-')
+            else:
+                seq = ' -> '.join(f'D{d+1}' for d in self.sequence)
+                self.sequence_text.insert('end', seq)
+            self.sequence_text.config(state='disabled')
+        except Exception:
+            pass
+
+    def _apply_initial_sashes(self):
+        if not self._sashes_set:
+            self._set_paned_sashes()
+
+    def _on_paned_configure(self, event):
+        if self._in_paned_configure:
+            return
+        self._set_paned_sashes()
+
+    def _set_paned_sashes(self):
+        try:
+            self._in_paned_configure = True
+            total = self._paned.winfo_width()
+            if total <= 0:
+                return
+            left_w = max(180, int(total * 0.20))
+            right_start = max(left_w + 360, int(total * 0.80))
+            self._paned.sash_place(0, left_w, 0)
+            self._paned.sash_place(1, right_start, 0)
+            self._sashes_set = True
+        finally:
+            self._in_paned_configure = False
+
+    def _center_matrix_window(self, event):
+        try:
+            self.matrix_canvas.update_idletasks()
+            cw = self.matrix_canvas.winfo_width()
+            ch = self.matrix_canvas.winfo_height()
+            iw = self.matrix_inner.winfo_reqwidth()
+            ih = self.matrix_inner.winfo_reqheight()
+            x = max((cw - iw) // 2, 0)
+            y = max((ch - ih) // 2, 0)
+            self.matrix_canvas.coords(self.matrix_inner_id, x, y)
+        except Exception:
+            pass
+
+    def _compute_tcr_values(self):
+        # compute TCR without mutating UI/logs
+        tcr = [0 for _ in range(self.n)]
+        for i in range(self.n):
+            s = 0
+            for j in range(self.n):
+                if i == j:
+                    continue
+                rel = self.matrix[i][j]
+                if rel == 'X':
+                    continue
+                s += self.values.get(rel, 0)
+            tcr[i] = s
+        return tcr
+
+    def _layout_ascii(self):
+        if not self.placed_positions:
+            return 'No layout placements yet.'
+        xs = [p[0] for p in self.placed_positions.values()]
+        ys = [p[1] for p in self.placed_positions.values()]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        cols = max_x - min_x + 1
+        rows = max_y - min_y + 1
+        cell_w = 4
+        grid = [[' ' * cell_w for _ in range(cols)] for _ in range(rows)]
+        for dept, (x, y) in self.placed_positions.items():
+            gx = x - min_x
+            gy = max_y - y
+            label = f'D{dept+1}'
+            label = label[:cell_w].ljust(cell_w)
+            if 0 <= gy < rows and 0 <= gx < cols:
+                grid[gy][gx] = label
+        lines = [''.join(row).rstrip() for row in grid]
+        header = f'Layout grid (x={min_x}..{max_x}, y={min_y}..{max_y}):'
+        return header + '\n' + '\n'.join(lines)
+
+    def _build_report_lines(self):
+        lines = []
+        lines.append('RDP Report')
+        lines.append('=' * 40)
+        lines.append('1) Inputs')
+        lines.append(f'- Number of Departments: {self.n}')
+        lines.append('- Relationship Values:')
+        for k in REL_CHOICES:
+            lines.append(f'  - {k} = {self.values.get(k, 0)}')
+        lines.append('')
+        lines.append('2) Relationship Matrix')
+        header = '     ' + ' '.join([f'D{j+1:02d}' for j in range(self.n)])
+        lines.append(header)
+        for i in range(self.n):
+            row = [self.matrix[i][j] if self.matrix[i][j] != '' else 'U' for j in range(self.n)]
+            lines.append(f'D{i+1:02d}  ' + '  '.join(row))
+        lines.append('')
+        lines.append('3) TCR')
+        if self.started_for_matrix and hasattr(self, 'tcr'):
+            tcr_vals = self._compute_tcr_values()
+            lines.append('- ' + ', '.join([f'D{i+1}={tcr_vals[i]}' for i in range(self.n)]))
+        else:
+            lines.append('- (Not computed yet)')
+        lines.append('')
+        lines.append('4) Final Sequence')
+        if self.started_for_matrix and self.sequence:
+            lines.append('- ' + ' -> '.join([f'D{d+1}' for d in self.sequence]))
+        else:
+            lines.append('- (Not computed yet)')
+        lines.append('')
+        lines.append('5) Selection Steps')
+        if self.started_for_matrix and self.selection_steps:
+            for s in self.selection_steps:
+                if s.startswith('Step4:'):
+                    lines.append('- Step 4: ' + s.replace('Step4: ', ''))
+                elif s.startswith('Step5:'):
+                    lines.append('- Step 5: ' + s.replace('Step5: ', ''))
+                elif s.startswith('Step6:'):
+                    lines.append('- Step 6: ' + s.replace('Step6: ', ''))
+                elif s.startswith('Fallback:'):
+                    lines.append('- Fallback: ' + s.replace('Fallback: ', ''))
+                else:
+                    lines.append('- ' + s)
+        else:
+            lines.append('- (Not computed yet)')
+        lines.append('')
+        lines.append('6) Layout Steps')
+        if self.started_for_matrix and self.layout_steps:
+            for step in self.layout_steps:
+                if len(step) >= 4:
+                    dept, best_spot, wpv, details = step[:4]
+                    lines.append(f'- D{dept+1} at {best_spot} WPV={wpv:.1f}')
+                    lines.append(f'  - {details}')
+        else:
+            lines.append('- (Not computed yet)')
+        lines.append('')
+        lines.append('7) Final Layout')
+        if self.placed_positions:
+            lines.append('- Positions:')
+            for dept in sorted(self.placed_positions.keys()):
+                lines.append(f'  - D{dept+1}: {self.placed_positions[dept]}')
+        else:
+            lines.append('- (No placements yet)')
+        lines.append(self._layout_ascii())
+        lines.append('')
+        # omit UI logs; report focuses on algorithm flow only
+        return lines
+
+    def preview_report(self):
+        lines = self._build_report_lines()
+        preview = '\n'.join(lines)
+        win = tk.Toplevel(self)
+        win.title('Report Preview')
+        win.geometry('800x600')
+        win.transient(self)
+
+        frame = ttk.Frame(win)
+        frame.pack(fill='both', expand=True, padx=8, pady=8)
+
+        text = tk.Text(frame, wrap='none')
+        y_scroll = ttk.Scrollbar(frame, orient='vertical', command=text.yview)
+        x_scroll = ttk.Scrollbar(frame, orient='horizontal', command=text.xview)
+        text.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+
+        text.grid(row=0, column=0, sticky='nsew')
+        y_scroll.grid(row=0, column=1, sticky='ns')
+        x_scroll.grid(row=1, column=0, sticky='ew')
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        text.insert('1.0', preview)
+        text.config(state='disabled')
+
+    def export_report(self):
+        path = filedialog.asksaveasfilename(
+            title='Export RDP Report',
+            defaultextension='.txt',
+            filetypes=[('Text files', '*.txt'), ('All files', '*.*')]
+        )
+        if not path:
+            return
+
+        lines = self._build_report_lines()
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+            messagebox.showinfo('Export', f'Report saved to:\n{path}')
+        except Exception as e:
+            messagebox.showerror('Export Error', f'Failed to save report:\n{e}')
 
 
 class ConfigValuesDialog(tk.Toplevel):
