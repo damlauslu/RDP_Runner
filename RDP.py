@@ -29,6 +29,7 @@ class RDPApp(tk.Tk):
 
         self.placed_positions = {}  # dept_id -> (x,y)
         self.started_for_matrix = False
+        self.matrix_editable = True
 
         self._build_ui()
 
@@ -62,8 +63,10 @@ class RDPApp(tk.Tk):
         rand_btn = tk.Button(left, text='Randomize Relations', command=self.randomize_matrix, bg='#ADD8E6')
         rand_btn.pack(fill='x', pady=4)
 
-        cfg_btn = tk.Button(left, text='Configure Values', command=self.configure_values)
-        cfg_btn.pack(fill='x', pady=4)
+        self.cfg_btn = tk.Button(left, text='Configure Values', command=self.configure_values)
+        self.cfg_btn.pack(fill='x', pady=4)
+        self.cfg_btn.bind('<Enter>', self._on_configure_hover)
+        self.cfg_btn.bind('<Leave>', self._on_configure_leave)
 
         start_btn = tk.Button(left, text='Start Calculation', command=self.start_calculation, bg='#90EE90')
         start_btn.pack(fill='x', pady=8)
@@ -83,10 +86,10 @@ class RDPApp(tk.Tk):
         # Row 2: Reset buttons
         row2 = ttk.Frame(control_frame)
         row2.pack(fill='x', pady=(6, 0))
-        reset_btn = tk.Button(row2, text='Reset All', command=self.reset_all, bg='#FA8072')
-        reset_btn.pack(side='left', expand=True, fill='x')
         reset_keep_btn = tk.Button(row2, text='Reset Steps', command=self.reset_steps_only, bg='#FAE28C')
-        reset_keep_btn.pack(side='left', expand=True, fill='x', padx=4)
+        reset_keep_btn.pack(side='left', expand=True, fill='x')
+        reset_btn = tk.Button(row2, text='Reset All', command=self.reset_all, bg='#FA8072')
+        reset_btn.pack(side='left', expand=True, fill='x', padx=4)
 
         preview_btn = tk.Button(left, text='Preview Report', command=self.preview_report, bg='#E0E0E0')
         preview_btn.pack(fill='x', pady=4)
@@ -105,9 +108,11 @@ class RDPApp(tk.Tk):
         self.log_text = tk.Text(left, height=12)
         self.log_text.pack(fill='both', expand=True)
 
-        # Middle: Matrix and Canvas (center column)
-        self.matrix_container = ttk.Frame(middle)
-        self.matrix_container.pack(fill='both', expand=True)
+        # Middle: Matrix and Canvas (center column) with resizable split
+        middle_paned = tk.PanedWindow(middle, orient='vertical')
+        middle_paned.pack(fill='both', expand=True)
+
+        self.matrix_container = ttk.Frame(middle_paned)
         self.matrix_canvas = tk.Canvas(self.matrix_container, height=360)
         self.matrix_scroll_y = ttk.Scrollbar(self.matrix_container, orient='vertical', command=self.matrix_canvas.yview)
         self.matrix_scroll_x = ttk.Scrollbar(self.matrix_container, orient='horizontal', command=self.matrix_canvas.xview)
@@ -119,21 +124,28 @@ class RDPApp(tk.Tk):
         self.matrix_scroll_x.pack(side='bottom', fill='x')
         self.matrix_inner.bind('<Configure>', lambda e: self.matrix_canvas.configure(scrollregion=self.matrix_canvas.bbox('all')))
         self.matrix_canvas.bind('<Configure>', self._center_matrix_window)
+        self.matrix_canvas.bind('<Enter>', self._on_matrix_hover)
+        self.matrix_canvas.bind('<Leave>', self._on_matrix_leave)
 
-        canvas_label = ttk.Label(middle, text='Layout Visualization:')
-        canvas_label.pack(anchor='w')
+        ttk.Label(
+            self.matrix_container,
+            text='Edit relationships in the matrix or use "Randomize Relations".',
+            foreground='#666666'
+        ).pack(anchor='e', pady=(2, 6), padx=6)
+
         # Canvas with scrollbars
-        canvas_frame = ttk.Frame(middle)
-        canvas_frame.pack(fill='both', expand=True)
+        canvas_frame = ttk.Frame(middle_paned)
+        canvas_label = ttk.Label(canvas_frame, text='Layout Visualization:')
+        canvas_label.pack(anchor='w')
         self.canvas = tk.Canvas(canvas_frame, bg='white', height=280)
         self.canvas_h = ttk.Scrollbar(canvas_frame, orient='horizontal', command=self.canvas.xview)
         self.canvas_v = ttk.Scrollbar(canvas_frame, orient='vertical', command=self.canvas.yview)
         self.canvas.configure(xscrollcommand=self.canvas_h.set, yscrollcommand=self.canvas_v.set)
-        self.canvas.grid(row=0, column=0, sticky='nsew')
-        self.canvas_v.grid(row=0, column=1, sticky='ns')
-        self.canvas_h.grid(row=1, column=0, sticky='ew')
-        canvas_frame.rowconfigure(0, weight=1)
-        canvas_frame.columnconfigure(0, weight=1)
+        self.canvas.pack(side='top', fill='both', expand=True)
+        self.canvas_v.pack(side='right', fill='y')
+        self.canvas_h.pack(side='bottom', fill='x')
+        middle_paned.add(self.matrix_container, minsize=200)
+        middle_paned.add(canvas_frame, minsize=200)
 
         # storage for vars and widgets
         self.var_matrix = []
@@ -145,6 +157,8 @@ class RDPApp(tk.Tk):
         self.tcr_tree = ttk.Treeview(data_top, columns=('dept','tcr'), show='headings', height=8)
         self.tcr_tree.heading('dept', text='Dept')
         self.tcr_tree.heading('tcr', text='TCR')
+        self.tcr_tree.column('dept', width=60, anchor='center', stretch=False)
+        self.tcr_tree.column('tcr', width=120, anchor='center', stretch=True)
         self.tcr_tree.pack(fill='both', expand=True)
         ttk.Label(data_top, text='Sequence (Pi):').pack(anchor='w', pady=(6, 0))
         self.sequence_text = tk.Text(data_top, height=2, wrap='word')
@@ -205,6 +219,8 @@ class RDPApp(tk.Tk):
                 om.grid(row=i+1, column=j+1, padx=1, pady=1)
                 if i == j:
                     om.config(state='disabled')
+                elif not self.matrix_editable:
+                    om.config(state='disabled')
                 row_vars.append(var)
                 row_oms.append(om)
                 # apply initial color
@@ -234,6 +250,16 @@ class RDPApp(tk.Tk):
         # val comes from OptionMenu; treat '' as 'U'
         chosen = val if val != '' else 'U'
         if 0 <= i < self.n and 0 <= j < self.n:
+            if not self.matrix_editable:
+                self._show_matrix_edit_tip()
+                # revert UI selection
+                current = self.matrix[i][j]
+                disp = '' if current == 'U' else current
+                try:
+                    self.var_matrix[i][j].set(disp)
+                except Exception:
+                    pass
+                return
             self.started_for_matrix = False
             self._clear_outputs()
             # enforce symmetry
@@ -256,6 +282,9 @@ class RDPApp(tk.Tk):
             # calculations are only shown after Start Calculation
 
     def randomize_matrix(self):
+        # stop any running algorithm and allow edits
+        self.reset_steps_only()
+        self._set_matrix_editable(True)
         # Weighted randomization - sparser on strong relations
         weights = {
             'U': 50,
@@ -280,6 +309,8 @@ class RDPApp(tk.Tk):
         self.generate_matrix(init=False)
 
     def configure_values(self):
+        if self.started_for_matrix:
+            return
         dlg = ConfigValuesDialog(self, self.values)
         self.wait_window(dlg)
         if dlg.result:
@@ -288,10 +319,13 @@ class RDPApp(tk.Tk):
             self.log(f'Values updated: {self.values}')
             # refresh TCR view if present
             self.update_tcr_view()
+            # restart calculation with new values
+            self.start_calculation()
 
     def start_calculation(self):
-        if self.started_for_matrix:
+        if self.started_for_matrix and self.tcr_tree.get_children():
             return
+        self._set_matrix_editable(False)
         # compute selection sequence following the strict logic
         self.reset_state_for_run()
         self.compute_tcr()
@@ -320,6 +354,7 @@ class RDPApp(tk.Tk):
             self.log(s)
         # prepare layout steps (but do not execute any placement)
         self.prepare_layout()
+        self._update_sequence_view()
         # move to layout phase, but don't show ghosts or place anything
         self.current_phase = 'layout'
         self.layout_index = 0
@@ -510,7 +545,6 @@ class RDPApp(tk.Tk):
                     Pi[i] = remaining.pop(0)
 
         self.sequence = Pi
-        self._update_sequence_view()
 
     def next_step(self):
         if self.current_phase == 'selection':
@@ -522,6 +556,7 @@ class RDPApp(tk.Tk):
                 if self.selection_index >= len(self.selection_steps):
                     self.current_phase = 'layout'
                     self.prepare_layout()
+                    self._update_sequence_view()
                     self.log('Switching to layout phase. Use Next Step to place departments.')
                 return
         if self.current_phase == 'layout':
@@ -534,6 +569,18 @@ class RDPApp(tk.Tk):
                     dept, best_spot, wpv, details = step
                     candidates = []
 
+                # place the first department immediately on the first layout step
+                if self.layout_index == 0 and not self.placed_positions:
+                    self.placed_positions[dept] = best_spot
+                    self.draw_layout()
+                    self.log(details)
+                    try:
+                        self.wpv_tree.insert('', 'end', values=(f'D{dept+1}: Placed at {best_spot} with WPV={wpv:.1f}',))
+                    except Exception:
+                        pass
+                    self.layout_index += 1
+                    return
+
                 # If ghosts not yet shown for this step, draw them and wait for confirmation
                 if not getattr(self, 'layout_showing_ghosts', False):
                     # draw candidate ghost blocks with WPV overlay
@@ -545,7 +592,7 @@ class RDPApp(tk.Tk):
                         pass
                     for spot, wpv_val, det in candidates:
                         self.wpv_tree.insert('', 'end', values=(f'D{dept+1} candidate {spot}: WPV={wpv_val:.1f}',))
-                    self.log(f'Evaluating placement for D{dept+1}: showing {len(candidates)} candidate spots with WPV')
+                    self.log(f'Layout Step {self.layout_index + 1}: showing WPV candidates for D{dept+1}.')
                     self.layout_showing_ghosts = True
                     return
 
@@ -553,7 +600,7 @@ class RDPApp(tk.Tk):
                 self.canvas.delete('ghost')
                 self.placed_positions[dept] = best_spot
                 self.draw_layout()
-                self.log(details)
+                self.log(f'Layout Step {self.layout_index + 1}: {details}')
                 # record placement in WPV log
                 try:
                     self.wpv_tree.insert('', 'end', values=(f'D{dept+1}: Placed at {best_spot} with WPV={wpv:.1f}',))
@@ -575,6 +622,7 @@ class RDPApp(tk.Tk):
             self.selection_index = len(self.selection_steps)
             self.current_phase = 'layout'
             self.prepare_layout()
+            self._update_sequence_view()
             self.log('Switching to layout phase.')
 
         if self.current_phase == 'layout':
@@ -753,6 +801,7 @@ class RDPApp(tk.Tk):
         # Reset algorithmic state
         self.reset_state_for_run()
         self.started_for_matrix = False
+        self._set_matrix_editable(True)
         self.sequence = []
         self.selection_steps = []
         self.layout_steps = []
@@ -799,6 +848,7 @@ class RDPApp(tk.Tk):
         self.selection_index = 0
         self.layout_index = 0
         self.started_for_matrix = False
+        self._set_matrix_editable(True)
         self._clear_outputs()
         try:
             self.next_btn.config(state='disabled')
@@ -810,6 +860,36 @@ class RDPApp(tk.Tk):
     def log(self, msg):
         self.log_text.insert('end', f'- {msg}\n')
         self.log_text.see('end')
+
+    def _on_configure_hover(self, event):
+        if not self.started_for_matrix:
+            return
+        if getattr(self, '_cfg_tip', None):
+            return
+        tip = tk.Toplevel(self)
+        tip.wm_overrideredirect(True)
+        tip.attributes('-topmost', True)
+        label = tk.Label(
+            tip,
+            text='Stop running: click "Reset Steps" to change values.',
+            bg='#FFF3CD',
+            fg='#333333',
+            padx=8,
+            pady=4,
+            borderwidth=1,
+            relief='solid'
+        )
+        label.pack()
+        x = self.cfg_btn.winfo_rootx() + 10
+        y = self.cfg_btn.winfo_rooty() + self.cfg_btn.winfo_height() + 6
+        tip.geometry(f'+{x}+{y}')
+        self._cfg_tip = tip
+
+    def _on_configure_leave(self, event):
+        tip = getattr(self, '_cfg_tip', None)
+        if tip:
+            tip.destroy()
+            self._cfg_tip = None
 
     def _clear_outputs(self):
         try:
@@ -837,7 +917,7 @@ class RDPApp(tk.Tk):
         guide = (
             'Quick Guide\n'
             '- Set the number of departments; the matrix updates automatically.\n'
-            '- Edit relationships or use Randomize Relations.\n'
+            '- Edit relationships directly in the matrix or use Randomize Relations.\n'
             '- Start Calculation: computes TCR and prepares selection steps.\n'
             '- Next Step: advances one step at a time.\n'
             '- Jump to Layout: completes selection and prepares layout.\n'
@@ -858,9 +938,13 @@ class RDPApp(tk.Tk):
             '- Step 5: if a department has an X relation to the current, place it at the back.\n'
             '- Step 6: choose the next department with the highest-priority relation\n'
             '  to the already selected set (A > E > I > O).\n'
+            '- Layout Step A: evaluate candidate positions (WPV) around the current cluster.\n'
+            '- Layout Step B: place the department at the best WPV location.\n'
+            '- Layout order: start at center (0, 0) and scan candidate positions\n'
+            '  from the western edge, moving counter‑clockwise.\n'
             '- Fallback: if no A/E/I/O exists, pick by highest TCR.\n'
             '\n'
-            'Note: The log shows which rule was applied, not a global step count.'
+            'Note: Layout steps are separate from the main RDP step numbers.'
         )
         messagebox.showinfo('RDP Steps Info', info)
 
@@ -912,6 +996,54 @@ class RDPApp(tk.Tk):
             self.matrix_canvas.coords(self.matrix_inner_id, x, y)
         except Exception:
             pass
+
+    def _set_matrix_editable(self, enabled):
+        self.matrix_editable = enabled
+        try:
+            for i in range(self.n):
+                for j in range(self.n):
+                    if i == j:
+                        continue
+                    om = self.om_matrix[i][j]
+                    om.config(state='normal' if enabled else 'disabled')
+        except Exception:
+            pass
+
+    def _on_matrix_hover(self, event):
+        if not self.matrix_editable:
+            self._show_matrix_edit_tip()
+
+    def _on_matrix_leave(self, event):
+        self._hide_matrix_edit_tip()
+
+    def _show_matrix_edit_tip(self):
+        if getattr(self, '_matrix_tip', None):
+            return
+        tip = tk.Toplevel(self)
+        tip.wm_overrideredirect(True)
+        tip.attributes('-topmost', True)
+        label = tk.Label(
+            tip,
+            text='Stop running: use "Reset Steps" or "Reset All" to edit the matrix.',
+            bg='#FFF3CD',
+            fg='#333333',
+            padx=8,
+            pady=4,
+            borderwidth=1,
+            relief='solid'
+        )
+        label.pack()
+        x = self.matrix_canvas.winfo_rootx() + 10
+        y = self.matrix_canvas.winfo_rooty() + 10
+        tip.geometry(f'+{x}+{y}')
+        self._matrix_tip = tip
+        self.after(1500, self._hide_matrix_edit_tip)
+
+    def _hide_matrix_edit_tip(self):
+        tip = getattr(self, '_matrix_tip', None)
+        if tip:
+            tip.destroy()
+            self._matrix_tip = None
 
     def _compute_tcr_values(self):
         # compute TCR without mutating UI/logs
