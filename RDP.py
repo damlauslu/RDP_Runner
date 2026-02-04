@@ -56,7 +56,7 @@ class RDPApp(tk.Tk):
         num_frame.pack(fill='x', pady=(4, 8))
         tk.Label(num_frame, text='Number of Departments:', bg='#F1F4F8').pack(anchor='center', pady=(4, 2))
         self.n_var = tk.IntVar(value=self.n)
-        n_spin = ttk.Spinbox(num_frame, from_=2, to=20, textvariable=self.n_var, width=6, command=self._on_n_change)
+        n_spin = ttk.Spinbox(num_frame, from_=3, to=20, textvariable=self.n_var, width=6, command=self._on_n_change)
         n_spin.pack(anchor='center', pady=(0, 6))
         self.n_var.trace_add('write', lambda *args: self._on_n_change())
 
@@ -180,8 +180,8 @@ class RDPApp(tk.Tk):
         except Exception:
             messagebox.showerror('Error', 'Invalid N')
             return
-        if n < 2 or n > 20:
-            messagebox.showerror('Error', 'N must be between 2 and 20')
+        if n < 3 or n > 20:
+            messagebox.showerror('Error', 'N must be between 3 and 20')
             return
         self.n = n
         self._last_n = n
@@ -240,7 +240,7 @@ class RDPApp(tk.Tk):
             n = int(self.n_var.get())
         except Exception:
             return
-        if n < 2 or n > 20:
+        if n < 3 or n > 20:
             return
         if n == getattr(self, '_last_n', None):
             return

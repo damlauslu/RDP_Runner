@@ -3,9 +3,9 @@
 A Tkinter-based implementation of the Relationship Diagramming Process (RDP) with an interactive REL matrix editor, step-by-step execution, layout visualization, and report generation.
 
 ## Features
-- **Responsive 3‑pane layout** (left / center / right) with user-resizable sashes.
+- **Responsive 3-pane layout** (left / center / right) with user-resizable sashes.
 - **REL matrix editor** with symmetric updates and color-coded relationship strength.
-- **Step-by-step or run‑to‑end** execution of the RDP selection and layout phases.
+- **Step-by-step or run-to-end** execution of the RDP selection and layout phases.
 - **Layout visualization** with scrollable canvas and candidate WPV “ghosts.”
 - **TCR table + Sequence (Pi)** display.
 - **Report preview (in-app)** and **export to `.txt`**.
@@ -27,7 +27,7 @@ python RDP.py
 
 ## UI Overview
 **Left pane**
-- Number of Departments (2–20, auto-generates matrix)
+- Number of Departments (3–20, auto-generates matrix)
 - Randomize Relations
 - Configure Values (A/E/I/O/U/X)
 - Start Calculation
@@ -61,10 +61,13 @@ Reports include:
 - Layout steps (if computed)
 - Final layout positions + ASCII grid
 
+## Docs
+- `USER_GUIDE_TR.md` — Turkish detailed user guide (includes FAQ)
+
 ## Files
 - `RDP.py` — main application
 - `README.md` — overview
-- `USAGE.md` — step-by-step usage guide
+- `USER_GUIDE_TR.md` — Turkish detailed user guide (includes FAQ)
 
 ## Troubleshooting
 - **Center column not widest on first load:** the app enforces sash positions after geometry is computed. If your OS/theme overrides, resize once to reapply.
